@@ -11,7 +11,8 @@ import argparse
 def shingling(file, numDocs):
     print("\nShingling ...")
 
-    # curShingleID = 0
+    # Create a dictionary of the articles, mapping the article identifier
+    # to the list of shingle IDs that appear in the document.
     docsAsShingleSets = {}
     global docNames
 
@@ -22,21 +23,37 @@ def shingling(file, numDocs):
     totalShingles = 0
 
     for i in range(0, numDocs):
+        # Read all of the words (they are all on one line)
+        # and split them by white space.
         words = f.readline().split(" ")
+        # Get article ID.
         docID = words[0]
-        # print(docID)
 
+        # Maintain a list of all document IDs.
         docNames.append(docID)
         del words[0]
+
+        # 'shinglesInDoc' will hold all of the unique shingle IDs
+        # present in the current document. If a shingle ID occurs multiple
+        # times in the document, it will only appear once in the set.
         shinglesInDoc = set()
         if numK == 3:
+            # For each word in the document...
             for index in range(0, len(words) - 2):
+                # Construct the shingle text by combining three words together.
                 shingle = words[index] + " " + \
                     words[index + 1] + " " + words[index + 2]
+                # Hash the shingle to a 32-bit integer.
                 crc = binascii.crc32(str.encode(shingle)) & 0xffffffff
+
+                # Add the hash value to the list of shingles
+                # for the current document. Note that set objects will only
+                # add the value to the set if the set
+                # doesn't already contain it.
                 shinglesInDoc.add(crc)
         elif numK == 6:
             for index in range(0, len(words) - 5):
+                # Construct the shingle text by combining six words together.
                 shingle = words[index] + " " + \
                     words[index + 1] + " " + words[index + 2] + " " + \
                     words[index + 3] + " " + words[index + 4] + " " + \
@@ -45,6 +62,7 @@ def shingling(file, numDocs):
                 shinglesInDoc.add(crc)
         elif numK == 9:
             for index in range(0, len(words) - 8):
+                # Construct the shingle text by combining nine words together.
                 shingle = words[index] + " " + \
                     words[index + 1] + " " + words[index + 2] + " " + \
                     words[index + 3] + " " + words[index + 4] + " " + \
@@ -56,13 +74,18 @@ def shingling(file, numDocs):
             sys.stderr.write("Wrong variable k!")
             sys.exit(1)
 
+        # Store the completed list of shingles
+        # for this document in the dictionary.
         docsAsShingleSets[docID] = shinglesInDoc
+
+        # Count the number of shingles across all documents.
         if numK == 3:
             totalShingles = totalShingles + (len(words) - 2)
         elif numK == 6:
             totalShingles = totalShingles + (len(words) - 5)
         elif numK == 9:
             totalShingles = totalShingles + (len(words) - 8)
+
     f.close()
     t1 = time.time() - t0
     print('\nShingling ' + str(numDocs) +
@@ -86,6 +109,10 @@ def getTriangleIndex(i, j):
         i = j
         j = temp
 
+    # Calculate the index within the triangular array.
+    # This indexing scheme is taken from pg. 223 of:
+    # http://infolab.stanford.edu/~ullman/mmds/ch6.pdf
+    # But I adapted it for a 0-based index.
     k = int(i * (numDocs - (i + 1) / 2.0) + j - i) - 1
 
     return k
@@ -97,20 +124,26 @@ def getTriangleIndex(i, j):
 # Matrix is deleted after comparision and not used
 
 def jacSimilarities(shingleSets):
+    # Initialize empty list to store the similarity values.
+    # 'JSim' will be for the actual Jaccard Similarity values.
     JSim = [0 for x in range(numElems)]
-    print("\nBuilding index Jaccard ")
+    print("\nBuilding index Jaccard ... ")
     t0 = time.time()
+    # For every document pair...
     for i in range(0, numDocs):
+        # Retrieve the set of shingles for document i.
         s1 = shingleSets[docNames[i]]
         for j in range(i + 1, numDocs):
+            # Retrieve the set of shingles for document j.
             s2 = shingleSets[docNames[j]]
+            # Calculate and store the actual Jaccard similarity.
             JSim[getTriangleIndex(i, j)] = (
                 len(s1.intersection(s2)) / len(s1.union(s2)))
+    # Calculate the elapsed time (in seconds)
     elapsed = (time.time() - t0)
     print("\nCompare Jaccarda took %.2fsec" % elapsed)
-    # return JSim
-    # del JSim
-    # return JSim[getTriangleIndex(i, j)]
+    # Delete the Jaccard Similarities, because it's a big matrix.
+    del JSim
 
 
 # --------------Generate MinHash Signatures---------------
@@ -119,39 +152,78 @@ def jacSimilarities(shingleSets):
 def genMinHashSig(shingleSets, numHashes):
     t0 = time.time()
 
+    # Record the maximum shingle ID that we assigned.
     maxShingleID = 2 ** 32 - 1
+    # Largest prime number above 'maxShingleID'.
     nextPrime = 4294967311
 
+    # Our random hash function will take the form of:
+    # h(x) = (a*x + b) % c
+    # Where 'x' is the input value, 'a' and 'b' are random coefficients,
+    # and 'c' is a prime number just greater than maxShingleID.
+
+    # Generate a list of 'k' random coefficients for the random hash functions,
+    # while ensuring that the same value does not appear multiple times in the
+    # list.
     def genHashFunc(k):
+        # Create a list of 'k' random values.
         randList = []
         while k > 0:
+            # Get a random shingle ID.
             randIndex = random.randint(0, maxShingleID)
+            # Ensure that each random number is unique.
             while randIndex in randList:
                 randIndex = random.randint(0, maxShingleID)
+            # Add the random number to the list.
             randList.append(randIndex)
             k = k - 1
 
         return randList
-
+    # For each of the 'numHashes' hash functions,
+    # generate a different coefficient 'a' and 'b'.
     coeffA = genHashFunc(numHashes)
     coeffB = genHashFunc(numHashes)
 
-    print('\nGenerating MinHash')
+    print('\nGenerating MinHash ...')
 
+    # List of documents represented as signature vectors
     signatures = []
 
+    # Rather than generating a random permutation of all possible shingles,
+    # we'll just hash the IDs of the shingles that are
+    # actually in the document, then take the lowest resulting
+    # hash code value. This corresponds to the index of the first shingle
+    # that you would have encountered in the random order.
+
+    # For each document...
     for docID in docNames:
 
+        # Get the shingle set for this document.
         shingleIDSet = shingleSets[docID]
+        # The resulting minhash signature for this document.
         signature = []
 
+        # For each of the random hash functions...
         for i in range(0, numHashes):
+            # For each of the shingles actually in the document,
+            # calculate its hash code using hash function 'i'.
+
+            # Track the lowest hash ID seen. Initialize 'minHashCode'
+            # to be greater than the maximum
+            # possible value output by the hash.
             minHashCode = nextPrime + 1
+
+            # For each shingle in the document...
             for shingleID in shingleIDSet:
+                # Evaluate the hash function.
                 hashCode = (coeffA[i] * shingleID + coeffB[i]) % nextPrime
+                # Track the lowest hash code seen.
                 if hashCode < minHashCode:
                     minHashCode = hashCode
+            # Add the smallest hash code value as
+            # component number 'i' of the signature.
             signature.append(minHashCode)
+        # Store the MinHash signature for this document.
         signatures.append(signature)
     elapsed = (time.time() - t0)
 
@@ -163,14 +235,22 @@ def genMinHashSig(shingleSets, numHashes):
 
 
 def compareMinHash(signatures, numHashes):
+    # Initialize empty list to store the similarity values.
+    # 'estJSim' will be for the estimated Jaccard Similarities
+    # found by comparing the MinHash signatures.
     estJSim = [0 for x in range(numElems)]
     t0 = time.time()
     # For each of the test documents...
     for i in range(0, numDocs):
+        # Get the MinHash signature for document i.
         signature1 = signatures[i]
+        # For each of the other test documents...
         for j in range(i + 1, numDocs):
+            # Get the MinHash signature for document j.
             signature2 = signatures[j]
             count = 0
+            # Count the number of positions in the minhash signature
+            # which are equal.
             for k in range(0, numHashes):
                 count = count + (signature1[k] == signature2[k])
             estJSim[getTriangleIndex(i, j)] = (count / numHashes)
@@ -181,13 +261,18 @@ def compareMinHash(signatures, numHashes):
 
 def displayComparisionMinHash(estJSim, threshold):
     print("                   Est. J   Act. J")
+    # For each of the document pairs...
     for i in range(0, numDocs):
         for j in range(i + 1, numDocs):
+            # Retrieve the estimated similarity value for this pair.
             estJ = estJSim[getTriangleIndex(i, j)]
+            # If the similarity is above the threshold...
             if estJ > threshold:
+                # Calculate the actual Jaccard similarity for validation.
                 s1 = docsAsShingleSets[docNames[i]]
                 s2 = docsAsShingleSets[docNames[j]]
                 J = (len(s1.intersection(s2)) / len(s1.union(s2)))
+
                 print("  %5s --> %5s   %.2f     %.2f" %
                       (docNames[i], docNames[j], estJ, J))
 
@@ -195,22 +280,33 @@ def displayComparisionMinHash(estJSim, threshold):
 # -----------LSH Buckets------------------------------
 
 def genBuckets(signatures, numBands, numRows):
-    print('\nGenerating buckets')
+    print('\nGenerating buckets ...')
 
     t0 = time.time()
+    # Create a list of buckets.
     buckets = []
-
+    # For each band...
     for i in range(0, numBands):
+        # Create bucket which is dictionary.
         bucket = {}
+        # For every document(list signatures) in list of documents...
         for signature in signatures:
+            # Set the hash = 0
             hash = 0
+            # Take the index of document [0..., numDocs - 1]
             index = signatures.index(signature)
+            # For every hash in band...
             for j in range(0, numRows):
+                # Knuth's Multiplicative Hashing
                 hash = (hash * 2654435761 + signature[numRows * i + j])
+                # For 32 bit word size
                 hash = hash % (1 << 32)
+            # If hash bucket doesn't exist then create it.
             if hash not in bucket.keys():
                 bucket[hash] = set()
+            # Add LSH hash as a docID to bucket.
             bucket[hash].add(docNames[index])
+            # Store the LSH bucket signatures
         buckets.append(bucket)
         del bucket
 
@@ -223,15 +319,24 @@ def genBuckets(signatures, numBands, numRows):
 
 
 def selectCandidatePair(buckets):
+    # Create a dictionary of the candidate pairs.
     candidateDocs = {}
+    # For every band...
     for bucket in buckets:
+        # For every bucket...
         for hash in bucket:
+            # If bucket have more than 1 item.
             if (len(bucket[hash]) > 1):
+                # For every docID in bucket.
                 for docID in bucket[hash]:
+                    # If docID doesn't exist in bucket name(key),
+                    # create bucket.
                     if docID not in candidateDocs.keys():
                         candidateDocs[docID] = []
+                    # Union sets with other bands
                     candidateDocs[docID] = list(
                         set(bucket[hash]) | set(candidateDocs[docID]))
+                    # Remove docID which is name of bucket
                     candidateDocs[docID].remove(docID)
     # Remove duplicated document
     for docID in list(candidateDocs):
